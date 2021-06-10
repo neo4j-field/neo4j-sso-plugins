@@ -107,6 +107,8 @@ public class AADJWTAuthPlugin extends AuthPlugin.Adapter
 
 		        @SuppressWarnings("unchecked")
 				Collection roles = (Collection) tokenUser.get(groupsClaimName);
+//                api.log().info("useGroupMapping: " + useGroupMapping ) ;
+//                api.log().info("groupMapping: " + groupMapping ) ;
 		        for (Object s: roles) {
                     String t = s.toString() ;
                     if( useGroupMapping && groupMapping != null ) {
@@ -157,7 +159,7 @@ public class AADJWTAuthPlugin extends AuthPlugin.Adapter
 		audience = properties.getProperty( "auth.oauth.expectedAudience" );
 		issuer = properties.getProperty( "auth.oauth.expectedIssuer" );
 
-		String useGroups = properties.getProperty( "auth.aad.useGroupMapping" );
+		String useGroups = properties.getProperty( "auth.oauth.useGroupMapping" );
 		if( useGroups != null && useGroups.trim().toLowerCase().equals("true")) {
 		    useGroupMapping = true ;
         }
