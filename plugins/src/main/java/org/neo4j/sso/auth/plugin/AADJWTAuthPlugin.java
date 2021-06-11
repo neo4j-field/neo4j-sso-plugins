@@ -25,7 +25,6 @@ import java.nio.file.Path;
 import java.util.*;
 
 import org.jose4j.jwk.HttpsJwks;
-import org.jose4j.jwk.JsonWebKey;
 import org.jose4j.jwt.JwtClaims;
 import org.jose4j.jwt.MalformedClaimException;
 import org.jose4j.jwt.consumer.InvalidJwtException;
@@ -38,7 +37,7 @@ import com.neo4j.server.security.enterprise.auth.plugin.api.AuthToken;
 import com.neo4j.server.security.enterprise.auth.plugin.api.AuthenticationException;
 import com.neo4j.server.security.enterprise.auth.plugin.spi.AuthInfo;
 import com.neo4j.server.security.enterprise.auth.plugin.spi.AuthPlugin;
-import org.jose4j.lang.JoseException;
+import org.neo4j.sso.oauth.login.WebResource;
 
 public class AADJWTAuthPlugin extends AuthPlugin.Adapter
 {
@@ -153,6 +152,7 @@ public class AADJWTAuthPlugin extends AuthPlugin.Adapter
     {
         Path configFile = resolveConfigFilePath("oauth.conf");
         Properties properties = loadProperties( configFile );
+        WebResource.configPath = api.neo4jHome().resolve("conf") ;
 
         String groupMapFile = properties.getProperty( "auth.oauth.groupsMapping" );
         jwksURL = properties.getProperty( "auth.oauth.jwksURL" );

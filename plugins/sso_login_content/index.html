@@ -1,0 +1,366 @@
+﻿<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Single Page Demo</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <style type="text/css">
+        :root {
+            --font-size: 12pt;
+            --grid-main-area-width: minmax(auto, 72em);
+        }
+
+        textarea {
+            height: auto;
+            white-space: pre;
+            word-wrap: normal;
+            word-break: normal;
+            overflow: hidden;
+            font-family: monospace;
+        }
+
+        *[hidden] {
+            display: none;
+        }
+    </style>
+    <script type="module">
+        //
+        // origin https://github.com/jonathantneal/document-promises
+        //
+
+        // thenfied document ready states
+        const thenify = (type, readyState) => new Promise(resolve => {
+            const listener = () => {
+                if (readyState.test(document.readyState)) {
+                    document.removeEventListener(type, listener);
+
+                    resolve();
+                }
+            };
+
+            document.addEventListener(type, listener);
+
+            listener();
+        });
+
+        export const parsed        = thenify('readystatechange', /^(?:interactive|complete)$/);
+        export const contentLoaded = thenify('DOMContentLoaded', /^(?:interactive|complete)$/);
+        export const loaded        = thenify('readystatechange', /^complete$/); 
+
+        async function set_button_href_handlers() {
+            await parsed;
+            document.querySelectorAll("button[href]").forEach(i => {
+                if (!i.hasAttribute("title")) {
+                    const url = new URL(i.getAttribute("href"), location.href);
+                    i.setAttribute("title", url);
+                }
+                i.addEventListener("click", e => {
+                    const button = e.currentTarget;
+                    let target = button.getAttribute("target") || "_blank";
+                    if ("_self" === target) {
+                        if (e.ctrlKey) {
+                            target = "_blank";
+                        }
+                    }
+                    if ("_self" === target) {
+                        location.assign(button.getAttribute("href"));
+                    } else {
+                        window.open(button.getAttribute("href"), target);
+                    }
+                });
+            });
+        }
+
+        /*
+        * Base64 decode url safe
+        * https://tools.ietf.org/html/rfc7515#appendix-C
+        * https://tools.ietf.org/html/rfc4648#section-5
+        */
+        function atobUrlSafe(text) {
+            if (text == null) {
+                return null;
+            }
+            text = text
+                .replace(/\s+/g, "") // removes whitespace such as linefeeds from input encoded string
+                .replace(/-/g, "+") // replace '-' with '+'
+                .replace(/_/g, "/"); // replace '_' with '/'
+            switch (text.length % 4) {
+                case 2: text += "=="; break;
+                case 3: text += "="; break;
+                default: break; // if padding is wrong then eventually the atob call below fails
+            }
+            return atob(text);
+        }
+
+        /*
+        * Base64 encode url safe
+        * https://tools.ietf.org/html/rfc7515#appendix-C
+        * https://tools.ietf.org/html/rfc4648#section-5
+        */
+        function btoaUrlSafe(text) {
+            if (text == null) {
+                return null;
+            }
+            text = btoa(text)
+                .replace(/\+/g, "-") // replace '+' with '-'
+                .replace(/\//g, "_") // replace '/' with '_'
+                .replace(/=+$/, ""); // remove trailing padding characters
+            return text;
+        }
+
+
+        const registration = {
+            issuer: "http://localhost:8080/auth/realms/SSO_Test",
+            client_id: "neo4j_SSO",
+            client_secret: "1c37a062-f7c5-4446-b29d-cdd98e767cf0",
+            scope: "openid"
+        };
+
+        function set_value(id, value) {
+            const element = document.getElementById(id);
+            element.value = value;
+            element.dispatchEvent(new CustomEvent("input"));
+        }
+        async function getConfiguration(issuer) {
+            const uri = `${issuer}/.well-known/openid-configuration`;
+            const response = await fetch(uri);
+            if (!response.ok) throw { error: "http_error", response: response };
+            return await response.json();
+        }
+        async function getJWKS(config) {
+            const uri = config.jwks_uri;
+            const response = await fetch(uri);
+            if (!response.ok) throw { error: "http_error", response: response };
+            return await response.json();
+        }
+        async function newCodeVerifier(method) {
+            switch (method) {
+                case "plain":
+                case "S256":
+                    return btoaUrlSafe(Array.from(window.crypto.getRandomValues(new Uint8Array(32)), t => String.fromCharCode(t)).join(""))
+                case "":
+                case null:
+                    return null;
+                default:
+                    throw "invalid argument";
+            }
+        }
+        async function getCodeChallenge(method, code_verifier) {
+            switch (method) {
+                case "plain":
+                    if (code_verifier === null) throw "invalid argument";
+                    return code_verifier;
+                case "S256":
+                    if (code_verifier === null) throw "invalid argument";
+                    let bytes = Uint8Array.from(code_verifier, t => t.charCodeAt(0));
+                    bytes = await window.crypto.subtle.digest("SHA-256", bytes);
+                    return btoaUrlSafe(Array.from(new Uint8Array(bytes), t => String.fromCharCode(t)).join(""));
+                case "":
+                case null:
+                    return null;
+                default:
+                    throw "invalid argument";
+            }
+        }
+        async function sendAuthenticationRequest(configuration, client_id, scope) {
+            const authorization_request = new URL(configuration.authorization_endpoint);
+            authorization_request.searchParams.set("response_type", "code");
+            authorization_request.searchParams.set("scope", scope);
+            authorization_request.searchParams.set("client_id", client_id);
+            authorization_request.searchParams.set("redirect_uri", location.origin + location.pathname);
+            // nonce
+            const nonce = Array.from(window.crypto.getRandomValues(new Uint32Array(4)), t => t.toString(36)).join("");
+            authorization_request.searchParams.set("nonce", nonce);
+            window.localStorage.setItem("/auth#nonce", nonce);
+            // code_challenge_method
+            const code_challenge_method = "S256";
+            authorization_request.searchParams.set("code_challenge_method", code_challenge_method);
+            // code_verifier
+            const code_verifier = await newCodeVerifier(code_challenge_method);
+            window.localStorage.setItem("/auth#code_verifier", code_verifier);
+            // code_challenge
+            const code_challenge = await getCodeChallenge(code_challenge_method, code_verifier);
+            authorization_request.searchParams.set("code_challenge", code_challenge);
+            location.assign(authorization_request);
+        }
+        async function invokeTokenRequest(configuration, client_id, client_secret, code) {
+            const token_endpoint = configuration.token_endpoint;
+            const headers = { "Content-Type": "application/x-www-form-urlencoded" };
+            const body = new URLSearchParams();
+            body.set("grant_type", "authorization_code");
+            body.set("code", code);
+            body.set("client_id", client_id);
+            body.set("client_secret", client_secret);
+            body.set("redirect_uri", location.origin + location.pathname);
+            const code_verifier = window.localStorage.getItem("/auth#code_verifier");
+            if (code_verifier) {
+                body.set("code_verifier", code_verifier);
+            }
+            try {
+                const response = await fetch(token_endpoint, { method: "POST", mode: "cors", headers: headers, body: body.toString() });
+                if (!response.ok) throw { error: "http_error", response: response };
+                return await response.json();
+            } finally {
+                window.localStorage.removeItem("/auth#code_verifier");
+            }
+        }
+        async function decodeJWT(jwks, jwt) {
+
+            const jws = jwt.split(".");
+            const header = JSON.parse(atobUrlSafe(jws[0]));
+            const claims = JSON.parse(atobUrlSafe(jws[1]));
+            const text2verify = Uint8Array.from(jws[0] + "." + jws[1], t => t.charCodeAt(0));
+            const signature = Uint8Array.from(atobUrlSafe(jws[2]), t => t.charCodeAt(0));
+
+            const negative = {
+                "header": header,
+                "claims": claims,
+                "signature": false,
+                "jwk": null,
+            };
+
+            function isSig(jwk) {
+                return (jwk.use == null || jwk.use == "sig");
+            }
+
+            function toJwk(jwk) {
+                return {
+                    "kty": jwk.kty,
+                    "n": jwk.n,
+                    "e": jwk.e
+                };
+            }
+
+            const keys = jwks.keys
+                .filter(isSig)
+                .map(toJwk);
+
+            const RS256 = {
+                name: "RSASSA-PKCS1-v1_5",
+                hash: { name: "SHA-256" },
+            };
+
+            for (const jwk of keys) {
+                try {
+                    const key = await window.crypto.subtle.importKey("jwk", jwk, RS256, false, ["verify"]);
+                    const result = await window.crypto.subtle.verify(RS256, key, signature, text2verify);
+                    if (result === true) {
+                        return {
+                            "header": header,
+                            "claims": claims,
+                            "signature": true,
+                            "jwk": jwk,
+                        };
+                    }
+                } catch {
+                    // ignore
+                }
+            }
+
+            return negative;
+        }
+
+ function getConnectionsObject(boltUrl, username, password) {
+      var conns = { "allConnectionIds": ["$$discovery"],
+      "connectionsById": 
+      {"$$discovery": 
+      {"host": boltUrl,
+      "id": "$$discovery",
+      "name": "$$discovery",
+      "type": "bolt",
+      "username": username,
+      "password": password}
+    },
+    "activeConnection":"$$discovery",
+    "connectionState":1}
+    return conns;
+  }
+
+        async function handleAuthenticationResponse() {
+            const params = new URLSearchParams(location.search.substr(1));
+            if (params.has("code")) {
+                window.history.replaceState(null, null, location.pathname);
+                const config = await getConfiguration(registration.issuer);
+                const tokenResponse = await invokeTokenRequest(config, registration.client_id, registration.client_secret, params.get("code"));
+                // if ("id_token" in tokenResponse) {
+                //     const jwks = await getJWKS(config);
+                //     const id_token = await decodeJWT(jwks, tokenResponse.id_token);
+                //     const signature_status = (id_token.signature === true) ? "signature verified" : "invalid signature";
+                //     document.getElementById("signature").innerText = `(${signature_status})`;
+                //     set_value("id_token", JSON.stringify(id_token.claims, null, 2));
+                //     const nonce_status = (id_token.claims.nonce == localStorage.getItem("/auth#nonce")) ? "nonce verified" : "invalid nonce";
+                //     document.getElementById("nonce").innerText = `(${nonce_status})`;
+                //     localStorage.removeItem("/auth#nonce");
+                // }
+                if ("access_token" in tokenResponse) {
+                    const jwks = await getJWKS(config);
+                    const access_token = await decodeJWT(jwks, tokenResponse.access_token);
+                    set_value("access_token", JSON.stringify(access_token.claims, null, 2));
+                    const nonce_status = (access_token.claims.nonce == localStorage.getItem("/auth#nonce")) ? "nonce verified" : "invalid nonce";
+                    document.getElementById("nonce").innerText = `(${nonce_status})`;
+                    localStorage.removeItem("/auth#nonce");
+                    localStorage.removeItem("authStart");
+                    set_value("id_token", tokenResponse.access_token);
+                    var neo4jConnValue = JSON.stringify(getConnectionsObject('bolt://localhost:7687', 'oauth_user', tokenResponse.access_token)) ;
+                    console.log(neo4jConnValue) ;
+                    localStorage.setItem("neo4j.connections", neo4jConnValue);
+
+                } else {
+                    fetchWithToken = null;
+                }
+                return;
+            }
+            if (params.has("error")) {
+                set_value("id_token", `error=${params.get("error")}`);
+            }
+        }
+        async function login_click(e) {
+            e.preventDefault();
+            set_value("id_token", "");
+            set_value("access_token", "");
+            const config = await getConfiguration(registration.issuer);
+            sendAuthenticationRequest(config, registration.client_id, registration.scope);
+        }
+        async function build_page() {
+            await parsed;
+            set_button_href_handlers();
+            document.getElementById("login").addEventListener("click", login_click);
+            document.querySelectorAll("textarea").forEach(t => t.addEventListener("input", e => {
+                e.target.style.height = "auto";
+                e.target.style.height = e.target.scrollHeight + "px";
+            }));
+        }
+        build_page();
+        handleAuthenticationResponse();
+        window.onload = function() {
+            console.log("Clicking login...") ;
+            var first = localStorage.getItem('authStart') ;
+            if( first == null ) {
+                window.localStorage.setItem("authStart", "true");
+                document.getElementById("login").click() ;
+            }
+            
+        };
+    </script>
+</head>
+
+<body>
+    <main>
+
+        <section class="outline">
+            <h1>Login</h1>
+            <form>
+                <p><button id="login" type="button">Login</button></p>
+                <p>ID Token <span id="signature"></span> <span id="nonce"></span></p>
+                <p><textarea class="flex1" id="id_token" style="width: 60%"></textarea></p>
+                <p>Access Token </p>
+                <p><textarea class="flex1" id="access_token" style="width: 60%"></textarea></p>
+            </form>
+            <a href="http://localhost:7474" > Go To Browser</a>
+        </section>
+
+    </main>
+</body>
+
+</html>
