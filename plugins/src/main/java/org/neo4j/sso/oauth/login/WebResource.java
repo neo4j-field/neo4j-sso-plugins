@@ -18,6 +18,7 @@
  */
 package org.neo4j.sso.oauth.login;
 
+import org.apache.shiro.authz.annotation.RequiresAuthentication;
 import org.neo4j.configuration.Config;
 import org.neo4j.graphdb.config.Setting;
 import org.neo4j.logging.Log;
