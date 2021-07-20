@@ -47,7 +47,7 @@
 
         export const parsed        = thenify('readystatechange', /^(?:interactive|complete)$/);
         export const contentLoaded = thenify('DOMContentLoaded', /^(?:interactive|complete)$/);
-        export const loaded        = thenify('readystatechange', /^complete$/);
+        export const loaded        = thenify('readystatechange', /^complete$/); 
 
         async function set_button_href_handlers() {
             await parsed;
@@ -112,35 +112,36 @@
 
 
         // Key Cloak config
-        const registration = {
-            issuer: "http://localhost:8080/auth/realms/SSO_Test",
-            client_id: "neo4j_SSO",
-            client_secret: "1c37a062-f7c5-4446-b29d-cdd98e767cf0",
-            scope: "openid"
-        };
+        // const registration = {
+        //     issuer: "http://localhost:8080/auth/realms/SSO_Test",
+        //     client_id: "neo4j_SSO",
+        //     client_secret: "1c37a062-f7c5-4446-b29d-cdd98e767cf0",
+        //     scope: "openid"
+        // };
 
         // Google Identity config
         // const registration = {
         //     issuer: "https://accounts.google.com",
-        //     client_id: "xxx",
-        //     client_secret: "xxx",
+        //     client_id: "1069036834443-n45ggacf7u36rnihtoafj3qgj74dtv99.apps.googleusercontent.com",
+        //     client_secret: "eY2J8iO7TC6IlybWhhMwzNh2",
         //     scope: "openid profile email"
         // };
 
         // Azure AAD config
-        // const registration = {
-        //     issuer: "https://login.microsoftonline.com/ec6b8f44-1b0f-4dd8-8a9f-16ec354662a7/v2.0",
-        //     client_id: "xxx",
-        //     // client_secret: "xxx",
-        //     scope: "openid email profile"
-        // };
+        const registration = {
+            issuer: "https://login.microsoftonline.com/ec6b8f44-1b0f-4dd8-8a9f-16ec354662a7/v2.0",
+            client_id: "e129004b-5fd3-431e-814b-a699d4333c13",
+            // client_secret: "9~oWt6krXvQJ3nG-GVg9_DF82F8Ws2d~xF",
+            scope: "openid email profile",
+            tokenType: "id_token"
+        };
 
         // OKTA Identity config
         // const registration = {
-        //     issuer: "https://dev-02848270.okta.com",
-        //     client_id: "xxx",
-        //     // client_secret: "xxx",
-        //     scope: "openid profile"
+        //     issuer: "https://dev-02848270.okta.com/oauth2/default",
+        //     client_id: "0oa11uydlv0zVkClD5d7",
+        //     scope: "openid profile",
+        //     tokenType: "id_token"
         // };
 
 
@@ -299,8 +300,8 @@
 
  function getConnectionsObject(boltUrl, username, password) {
       var conns = { "allConnectionIds": ["$$discovery"],
-      "connectionsById":
-      {"$$discovery":
+      "connectionsById": 
+      {"$$discovery": 
       {"host": boltUrl,
       "id": "$$discovery",
       "name": "$$discovery",
@@ -319,6 +320,8 @@
                 window.history.replaceState(null, null, location.pathname);
                 const config = await getConfiguration(registration.issuer);
                 const tokenResponse = await invokeTokenRequest(config, registration.client_id, registration.client_secret, params.get("code"));
+                var browserToken = null ;
+                
                 if ("id_token" in tokenResponse) {
                     const jwks = await getJWKS(config);
                     set_value("id_token_raw",tokenResponse.id_token);
@@ -329,22 +332,31 @@
                     const nonce_status = (id_token.claims.nonce == localStorage.getItem("/auth#nonce")) ? "nonce verified" : "invalid nonce";
                     document.getElementById("nonce").innerText = `(${nonce_status})`;
                     localStorage.removeItem("/auth#nonce");
+                    if( registration.tokenType != null && registration.tokenType === "id_token") {
+                        console.log("Using ID token for oAuth")
+                        browserToken = tokenResponse.id_token ;
+                    }
                 }
                 if ("access_token" in tokenResponse) {
                     const jwks = await getJWKS(config);
                     set_value("access_token_raw", tokenResponse.access_token);
-                    var neo4jConnValue = JSON.stringify(getConnectionsObject('bolt://localhost:7687', 'oauth_user', tokenResponse.access_token)) ;
-                    console.log(neo4jConnValue) ;
-                    localStorage.setItem("neo4j.connections", neo4jConnValue);
                     const access_token = await decodeJWT(jwks, tokenResponse.access_token);
                     set_value("access_token", JSON.stringify(access_token.claims, null, 2));
                     const nonce_status = (access_token.claims.nonce == localStorage.getItem("/auth#nonce")) ? "nonce verified" : "invalid nonce";
                     document.getElementById("nonce").innerText = `(${nonce_status})`;
                     localStorage.removeItem("/auth#nonce");
                     localStorage.removeItem("authStart");
-
+                    if( registration.tokenType == null || registration.tokenType === "access_token") {
+                        console.log("Using Access token for oAuth")
+                        browserToken = tokenResponse.access_token ;
+                    }
                 } else {
                     fetchWithToken = null;
+                }
+                if( browserToken != null ) {
+                    var neo4jConnValue = JSON.stringify(getConnectionsObject('bolt://localhost:7687', 'oauth_user', browserToken)) ;
+                    console.log(neo4jConnValue) ;
+                    localStorage.setItem("neo4j.connections", neo4jConnValue);
                 }
                 return;
             }
@@ -377,31 +389,31 @@
                 window.localStorage.setItem("authStart", "true");
                 document.getElementById("login").click() ;
             }
-
+            
         };
     </script>
 </head>
 
 <body>
-<main>
+    <main>
 
-    <section class="outline">
-        <h1>Login</h1>
-        <form>
-            <p><button id="login" type="button">Login</button></p>
-            <p>ID Token RAW<span id="signature"></span> <span id="nonce"></span></p>
-            <p><textarea class="flex1" id="id_token_raw" style="width: 60%"></textarea></p>
-            <p>ID Token <span id="signature"></span> <span id="nonce"></span></p>
-            <p><textarea class="flex1" id="id_token" style="width: 60%"></textarea></p>
-            <p>Access Token RAW</p>
-            <p><textarea class="flex1" id="access_token_raw" style="width: 60%"></textarea></p>
-            <p>Access Token </p>
-            <p><textarea class="flex1" id="access_token" style="width: 60%"></textarea></p>
-        </form>
-        <a href="http://localhost:7474" > Go To Browser</a>
-    </section>
+        <section class="outline">
+            <h1>Login</h1>
+            <form>
+                <p><button id="login" type="button">Login</button></p>
+                <p>ID Token RAW<span id="signature"></span> <span id="nonce"></span></p>
+                <p><textarea class="flex1" id="id_token_raw" style="width: 60%"></textarea></p>
+                <p>ID Token <span id="signature"></span> <span id="nonce"></span></p>
+                <p><textarea class="flex1" id="id_token" style="width: 60%"></textarea></p>
+                <p>Access Token RAW</p>
+                <p><textarea class="flex1" id="access_token_raw" style="width: 60%"></textarea></p>
+                <p>Access Token </p>
+                <p><textarea class="flex1" id="access_token" style="width: 60%"></textarea></p>
+            </form>
+            <a href="http://localhost:7474" > Go To Browser</a>
+        </section>
 
-</main>
+    </main>
 </body>
 
 </html>
